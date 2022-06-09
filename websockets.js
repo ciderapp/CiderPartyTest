@@ -1,4 +1,6 @@
 import { WebSocketServer } from 'ws';
+import { Server } from "socket.io"
+
 
 class Channel {
     constructor(name) {
@@ -10,7 +12,108 @@ class Channel {
         this.currentPlaybackTime = 0
         this.isPlaying = false
         this.queue = []
+        this.host = null
         this.MediaItem = {}
+    }
+}
+
+export class WSServerIO {
+    static server = null
+
+    static async init() {
+        WSServer.server = new Server(8889)
+
+
+        // when the user connects, say hello and if they reply with a message, send it back to them
+        WSServer.server.on('connection', (ws) => {
+            ws.send('welcome!')
+            ws.on('message', (message) => {
+                console.log('received: %s', message)
+                // send back hello
+                ws.send('hello')
+            })
+        })
+    }
+}
+
+const ServerActions = {
+    listChannels(client, msg = {}) {
+        let channelsList = []
+        WSServer.channels.forEach(channel => {
+            channelsList.push({
+                id: channel.id,
+                name: channel.name,
+                isPrivate: channel.isPrivate,
+                userCount: channel.clients.length
+            })
+        })
+        client.send(JSON.stringify({
+            type: 'listChannels',
+            channels: channelsList
+        }))
+    },
+    assumeHost(client, msg = {}) {
+        // get the channel that the client is in by client.id
+        let channel = WSServer.channels.find(channel => channel.clients.find(client => client.id === client.id))
+        if (channel) {
+            channel.host = client.id
+            client.send(JSON.stringify({
+                type: 'assumeHost',
+                success: true,
+                host: channel.host,
+                message: "You are now the host!"
+            }))
+        } else {
+            client.send(JSON.stringify({
+                type: 'assumeHost',
+                success: false,
+                message: "You are not in a channel!"
+            }))
+        }
+    },
+    createChannel(client, msg = {}) {
+        let channel = new Channel(msg.name)
+        WSServer.channels.push(channel)
+        client.send(JSON.stringify({
+            type: 'channelCreated',
+            channel: channel
+        }))
+    },
+    joinChannel(client, msg = {}) {
+        let channelToJoin = WSServer.channels.find(channel => channel.id === msg.channelId)
+        if (channelToJoin) {
+            channelToJoin.clients.push(client)
+            client.send(JSON.stringify({
+                type: 'channelJoined',
+                channel: channelToJoin
+            }))
+        }
+    },
+    leaveChannel(client, msg = {}) {
+        let channelToLeave = WSServer.channels.find(channel => channel.id === msg.channelId)
+        if (channelToLeave) {
+            channelToLeave.clients.splice(channelToLeave.clients.indexOf(client), 1)
+            client.send(JSON.stringify({
+                type: 'channelLeft',
+                channel: channelToLeave
+            }))
+        }
+    },
+    sendEvent(client, msg = {}) {
+        // send the event to all clients in the default channel
+        let defaultChannel = WSServer.channels[0]
+        defaultChannel.clients.forEach(client => {
+            // if the client is not the sender
+            if (client !== this) {
+                if (msg.event.type == "nowPlayingItemDidChange" && !client.isHost) {
+                    return
+                }
+                client.send(JSON.stringify({
+                    type: 'sendEvent',
+                    event: msg.event
+                }))
+            }
+        })
     }
 }
 
@@ -80,71 +183,25 @@ export class WSServer {
                 try {
                     msg = JSON.parse(message)
                 } catch (e) {
+                    console.log(e)
                     return;
                 }
                 console.log(msg)
                 // only accept messages from the first client
-                switch (msg.type) {
-                    case 'listChannels':
-                        let channelsList = []
-                        WSServer.channels.forEach(channel => {
-                            channelsList.push({
-                                id: channel.id,
-                                name: channel.name,
-                                isPrivate: channel.isPrivate,
-                                userCount: channel.clients.length
-                            })
+                try {
+                    if (ServerActions[msg.type]) {
+                        ServerActions[msg.type](client, msg)
+                    } else {
+                        console.log('invalid message type')
+                        client.send({
+                            type: 'error',
+                            message: 'invalid message type'
                         })
-                        client.send(JSON.stringify({
-                            type: 'listChannels',
-                            channels: channelsList
-                        }))
-                        break;
-                    case 'createChannel':
-                        let channel = new Channel(msg.name)
-                        WSServer.channels.push(channel)
-                        client.send(JSON.stringify({
-                            type: 'channelCreated',
-                            channel: channel
-                        }))
-                        break;
-                    case 'joinChannel':
-                        let channelToJoin = WSServer.channels.find(channel => channel.id === msg.channelId)
-                        if (channelToJoin) {
-                            channelToJoin.clients.push(client)
-                            client.send(JSON.stringify({
-                                type: 'channelJoined',
-                                channel: channelToJoin
-                            }))
-                        }
-                        break;
-                    case 'leaveChannel':
-                        let channelToLeave = WSServer.channels.find(channel => channel.id === msg.channelId)
-                        if (channelToLeave) {
-                            channelToLeave.clients.splice(channelToLeave.clients.indexOf(client), 1)
-                            client.send(JSON.stringify({
-                                type: 'channelLeft',
-                                channel: channelToLeave
-                            }))
-                        }
-                        break;
-                    case 'sendEvent':
-                        // send the event to all clients in the default channel
-                        let defaultChannel = WSServer.channels[0]
-                        defaultChannel.clients.forEach(client => {
-                            // if the client is not the sender
-                            if (client !== this) {
-                                if (msg.event.type == "nowPlayingItemDidChange" && !client.isHost) {
-                                    return
-                                }
-                                client.send(JSON.stringify({
-                                    type: 'sendEvent',
-                                    event: msg.event
-                                }))
-                            }
-                        })
-                        break;
+                    }
+                } catch (e) {
+                    console.log(e)
                 }
+
             })
             // when the client disconnects remove them from the list of clients and any channels they are in
             client.on('close', function () {
@@ -171,10 +228,10 @@ export class WSServer {
         let channel = WSServer.channels.find(channel => channel.id === channelId)
         channel.clients.forEach(client => {
             // if (client !== this) {
-                client.send(JSON.stringify({
-                    type: 'sendEvent',
-                    event: event
-                }))
+            client.send(JSON.stringify({
+                type: 'sendEvent',
+                event: event
+            }))
             // }
         })
     }
