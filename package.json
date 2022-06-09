@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node ."
   },
   "repository": {
     "type": "git",
@@ -12,11 +12,13 @@
   },
   "author": "",
   "license": "ISC",
+  "type": "module",
   "bugs": {
     "url": "https://github.com/booploops/CiderParty/issues"
   },
   "homepage": "https://github.com/booploops/CiderParty#readme",
   "dependencies": {
+    "fastify": "^4.0.0",
     "http": "^0.0.1-security",
     "ws": "^8.4.0"
   }
