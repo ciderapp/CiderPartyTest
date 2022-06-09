@@ -19,6 +19,10 @@ export class WSServer {
     static clients = []
     static channels = []
 
+    static channelExists(channelId) {
+        return WSServer.channels.find(channel => channel.id === channelId)
+    }
+
     static async init() {
         const testChannel = new Channel("Default Testing Channel")
         testChannel.id = "test"
@@ -67,8 +71,8 @@ export class WSServer {
             }));
 
             // add the user to the default channel
-            let defaultChannel = WSServer.channels[0]
-            defaultChannel.clients.push(client)
+            // let defaultChannel = WSServer.channels[0]
+            // defaultChannel.clients.push(client)
 
             // when the client sends a message
             client.on('message', function (message) {
